@@ -1,5 +1,5 @@
 import { SimpleMap } from "node-memoizer/Memoizer.types";
-import { BareFunction } from "utils/functions";
+import { AnyFunction } from "utils/functions";
 import { isNullish } from "utils/types";
 
 export function mapPop<K, V>(map: SimpleMap<K, V>, key: K): V | undefined {

@@ -1,5 +1,5 @@
 import { FastAsyncLocal } from "node-fast-async-local/FastAsyncLocal";
-import { BareFunction } from "utils/functions";
+import { AnyFunction } from "utils/functions";
 import { AsyncLocal } from "node-fast-async-local/AsyncLocal";
 import {
   AnyMemoizerStrategy,
@@ -18,30 +18,24 @@ import {
   MemoizerError,
   trackCachedItem,
 } from "node-memoizer/Memoizer.utils";
-import { Invocation } from "node-memoizer/Invocation";
+import { Invocation, InvocationData } from "node-memoizer/invocation";
 import { makeProxyFn } from "utils/function-proxy";
 import { SymbolicWeakMap } from "utils/SymbolicWeakMap";
-
-enum MagicMode {
-  cache, invalidate, refresh, hit
-}
 
 export class Memoizer<S extends AnyMemoizerStrategy> {
   private _asyncLocal: AsyncLocal<MemoizerContext<MemoizerStrategyKey<S>>>;
   private _strategy: S;
-  private _discriminatorCounter: number = 0;
-  private _metaMap = new SymbolicWeakMap<MemoizerMeta<S, any>>("memoizer_meta");
+  private _metaMap = new SymbolicWeakMap<AnyFunction, MemoizerMeta<S, any>>("memoizer_meta");
   private _defaults: MemoizerStrategyOptions<S> | undefined;
-  private _magic = MagicMode.cache;
 
   public constructor({
     strategy,
     defaults,
-    asyncLocal
+    asyncLocal = new FastAsyncLocal(),
   }: MemoizerOptions<S>) {
     this._strategy = strategy;
     this._defaults = defaults;
-    this._asyncLocal = asyncLocal ?? new FastAsyncLocal();
+    this._asyncLocal = asyncLocal;
 
     const proto = Object.getPrototypeOf(this);
     this.wrap = proto.wrap.bind(this);
@@ -49,68 +43,44 @@ export class Memoizer<S extends AnyMemoizerStrategy> {
     this.runInContext = proto.runInContext.bind(this);
     this.refresh = proto.refresh.bind(this);
     this.invalidate = proto.invalidate.bind(this);
-    this.invalidateFn = proto.invalidateFn.bind(this);
-    this.invalidateByFn = proto.invalidateByFn.bind(this);
-    this.invalidateByName = proto.invalidateByName.bind(this);
     this.invalidateAll = proto.invalidateAll.bind(this);
   }
 
   public runInContext<T>(cb: () => T): T {
     return this._asyncLocal.run({
-      cache: new Map(),
+      cacheMap: this._createCacheByFnMap(),
       depender: undefined,
     }, cb);
   }
 
-  public wrap<F extends BareFunction>(
+  public wrap<F extends AnyFunction>(
     fn: F,
     options?: MemoizeOptions & MemoizerStrategyOptions<S>,
   ): F {
-    const unique = ++this._discriminatorCounter;
     const { createEncoder, createKeyMap } = this._strategy;
     const encoder = createEncoder(options);
     const memoized = makeProxyFn(fn, invocation => {
-      const callerMagic = this._magic;
-      switch (callerMagic) {
-        case MagicMode.hit:
-          throw new MemoizerError("more than one function was called during invalidate or refresh");
-        case MagicMode.refresh:
-          this._magic = MagicMode.cache;
-          break;
-        case MagicMode.invalidate:
-          this._magic = MagicMode.hit;
-          break;
-      }
-      const { cache, depender } = this._getContext();
+      const { cacheMap, depender } = this._getContext();
       const key = encoder(invocation);
-      let innerCache = cache.get(meta) as (
+      let innerCache = cacheMap.get(meta) as (
         SimpleMap<MemoizerStrategyKey<S>, MemoizerCachedItem<MemoizerStrategyKey<S>, ReturnType<F>>> | undefined
         );
-      if (callerMagic === MagicMode.invalidate) {
-        deepInvalidate(innerCache?.get(key));
-        return undefined as any;
-      }
       if (innerCache === undefined) {
         innerCache = createKeyMap();
-        cache.set(meta, innerCache);
+        cacheMap.set(meta, innerCache);
       }
-      if (callerMagic === MagicMode.cache) {
         const oldItem = innerCache.get(key);
         if (oldItem && !oldItem.invalidated) {
           return trackCachedItem(oldItem, depender).get();
         }
-      }
       const newItem = trackCachedItem(
         new MemoizerCachedItem<MemoizerStrategyKey<S>, ReturnType<F>>(key, innerCache),
         depender,
       );
-      const newContext = { cache, depender: newItem };
-      const collapsed = this._asyncLocal.run(newContext, () => collapse(() => invocation.forward()));
+      const newContext = { cacheMap, depender: newItem };
+      const collapsed = this._asyncLocal.run(newContext, () => collapse(() => invocation.execute()));
       newItem.get = collapsed;
       innerCache.set(key, newItem);
-      if (callerMagic === MagicMode.refresh) {
-        this._magic = MagicMode.hit;
-      }
       return collapsed();
     });
 
@@ -125,7 +95,7 @@ export class Memoizer<S extends AnyMemoizerStrategy> {
 
   public decorate(options?: MemoizeOptions & MemoizerStrategyOptions<S>): MethodDecorator {
     return (
-      target: {} | undefined,
+      target: object | undefined,
       propertyKey: PropertyKey | undefined,
       descriptor: PropertyDescriptor,
     ) => {
@@ -133,64 +103,40 @@ export class Memoizer<S extends AnyMemoizerStrategy> {
     };
   }
 
-  public invalidate(fn: () => unknown): void {
-    this._magic = MagicMode.invalidate;
-    try {
-      fn();
-    } finally {
-      // @ts-ignore
-      if (this._magic !== MagicMode.hit) {
-        throw new MemoizerError('no memoized function was called during invalidate');
-      }
-      this._magic = MagicMode.cache;
+  public invalidate<F extends AnyFunction>({target, args, thisArg}: InvocationData<F>): void {
+    const meta = this._metaMap.get(target);
+    if (meta === undefined) {
+      throw new MemoizerError(`unable to invalidate, function ${target || "<anonymous>"} is not memoized`);
     }
+    const key = meta.encoder(new Invocation(meta.originalFn, args, thisArg!));
+    const item = this._getContext().cacheMap.get(meta)?.get(key);
+    deepInvalidate(item);
   }
 
-  public refresh<R>(fn: () => R): R {
-    this._magic = MagicMode.refresh;
-    try {
-      return fn();
-    } finally {
-      // @ts-ignore
-      if (this._magic !== MagicMode.hit) {
-        throw new MemoizerError('no memoized function was called during refresh');
-      }
-      this._magic = MagicMode.cache;
+  public refresh<F extends AnyFunction>(invocation: Invocation<F>): ReturnType<F> {
+    this.invalidate(invocation);
+    return invocation.execute();
+  }
+
+  private _createCacheByFnMap() {
+    return new WeakMap();
+  }
+  public invalidateAll(fn?: AnyFunction) {
+    const context = this._getContext();
+    if (fn === undefined) {
+      context.cacheMap = this._createCacheByFnMap();
+      return;
     }
-  }
 
-  public invalidateByName<O extends { [L in K]: BareFunction }, K extends PropertyKey>(target: O, propertyKey: K, args: Parameters<O[K]>) {
-    this.invalidateByFn(target[propertyKey], args, target as any);
-  }
-
-  public invalidateAll() {
-    this._getContext().cache.clear();
-  }
-
-  public invalidateFn(fn: BareFunction) {
     const meta = this._metaMap.get(fn);
     if (meta === undefined) {
       throw new MemoizerError(`unable to invalidate, function ${fn.name || "<anonymous>"} is not memoized`);
     }
-    const cacheL2 = this._getContext().cache.get(meta);
+    const cacheL2 = this._getContext().cacheMap.get(meta);
     if (cacheL2 !== undefined) {
       cacheL2.forEach(deepInvalidate);
       cacheL2.clear();
     }
-  }
-
-  public invalidateByFn<F extends BareFunction>(
-    fn: F,
-    args: Parameters<F>,
-    thisArg?: ThisParameterType<F>,
-  ) {
-    const meta = this._metaMap.get(fn);
-    if (meta === undefined) {
-      throw new MemoizerError(`unable to invalidate, function ${fn.name || "<anonymous>"} is not memoized`);
-    }
-    const key = meta.encoder(new Invocation(fn, args, thisArg!));
-    const item = this._getContext().cache.get(meta)?.get(key);
-    deepInvalidate(item);
   }
 
   private _getContext() {

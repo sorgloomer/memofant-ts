@@ -1,5 +1,5 @@
-import { BareFunction } from "utils/functions";
-import { InvocationParameters } from "node-memoizer/Invocation";
+import { AnyFunction } from "utils/functions";
+import { InvocationParameters } from "node-memoizer/invocation";
 import { AsyncLocal } from "node-fast-async-local/AsyncLocal";
 import { MemoizerCachedItem } from "node-memoizer/Memoizer.utils";
 
@@ -27,11 +27,11 @@ export interface MemoizeOptions {
 //  discriminator?: string,
 }
 
-export type MemoizerEncoder<K, F extends BareFunction>
+export type MemoizerEncoder<K, F extends AnyFunction>
   = (invocation: InvocationParameters<F>) => K;
 
-export type AnyMemoizerMeta = MemoizerMeta<AnyMemoizerStrategy, BareFunction>;
-export type MemoizerMeta<S extends AnyMemoizerStrategy, F extends BareFunction> = {
+export type AnyMemoizerMeta = MemoizerMeta<AnyMemoizerStrategy, AnyFunction>;
+export type MemoizerMeta<S extends AnyMemoizerStrategy, F extends AnyFunction> = {
 //  discriminator: Discriminator;
   encoder: MemoizerEncoder<MemoizerStrategyKey<S>, F>;
   originalFn: F;
@@ -45,14 +45,14 @@ export interface MemoizerOptions<S extends AnyMemoizerStrategy> {
 }
 
 export type MemoizerContext<K> = {
-  cache: Map<AnyMemoizerMeta, SimpleMap<K, MemoizerCachedItem<K, unknown>>>;
+  cacheMap: WeakMap<AnyMemoizerMeta, SimpleMap<K, MemoizerCachedItem<K, unknown>>>;
   depender: MemoizerCachedItem<K, any> | undefined;
 }
 
 export type Discriminator = string;
 
 export interface MemoizerEncoderFactory<K, O> {
-  <F extends BareFunction>(options?: O): MemoizerEncoder<K, F>;
+  <F extends AnyFunction>(options?: O): MemoizerEncoder<K, F>;
 }
 
 export type AnyMemoizerStrategy = MemoizerStrategy<any, any>;

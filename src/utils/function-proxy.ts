@@ -1,12 +1,12 @@
-import { BareFunction } from "../utils/functions";
-import { Invocation } from "node-memoizer/Invocation";
+import { AnyFunction } from "../utils/functions";
+import { Invocation } from "node-memoizer/invocation";
 import { SymbolicWeakMap } from "utils/SymbolicWeakMap";
 
 
-const metas = new SymbolicWeakMap<ProxyFnMeta<any>>('proxy_meta');
+const metas = new SymbolicWeakMap<object, ProxyFnMeta<any>>('proxy_meta');
 
 
-export function prepareProxyFn<T extends BareFunction, O extends T>(
+export function impersonateFn<T extends AnyFunction, O extends T>(
   original: O,
   proxy: T,
 ): O {
@@ -18,20 +18,20 @@ export function prepareProxyFn<T extends BareFunction, O extends T>(
 
 export type ProxyFnMeta<T> = { original: T };
 
-export function makeProxyFn<T extends BareFunction>(
-  fn: T,
-  cb: (invocation: Invocation<T>) => ReturnType<T>,
-): T {
+export function makeProxyFn<F extends AnyFunction>(
+  fn: F,
+  cb: (invocation: Invocation<F>) => ReturnType<F>,
+): F {
   const proxy = function _functionProxy(
-    this: ThisParameterType<T>,
-    ...args: Parameters<T>
-  ): ReturnType<T> {
-    return cb(new Invocation(fn, args, this));
-  } as T;
+    this: ThisParameterType<F>,
+    ...args: Parameters<F>
+  ): ReturnType<F> {
+    return cb(new Invocation<F>(fn, args, this));
+  } as F;
 
-  return prepareProxyFn<T, T>(fn, proxy);
+  return impersonateFn<F, F>(fn, proxy);
 }
 
-export function getProxyFnMeta<T>(fn: T): ProxyFnMeta<T> | undefined {
+export function getProxyFnMeta<T extends object>(fn: T): ProxyFnMeta<T> | undefined {
   return metas.get(fn);
 }

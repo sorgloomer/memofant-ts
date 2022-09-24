@@ -1,6 +1,6 @@
 import { Discriminator, MemoizerEncoder, MemoizerStrategy } from "node-memoizer/Memoizer.types";
-import { BareFunction } from "utils/functions";
-import { Invocation, InvocationParameters } from "node-memoizer/Invocation";
+import { AnyFunction } from "utils/functions";
+import { Invocation, InvocationParameters } from "node-memoizer/invocation";
 import { referenceIdentity } from "node-memoizer/ReferenceIdentity";
 import { UnreachableCaseError } from "utils/unreachable-case";
 import { Memoizer } from "node-memoizer/Memoizer";
@@ -12,7 +12,7 @@ interface JsonStrategyOptions {
 
 type JsonStrategyType = MemoizerStrategy<string, JsonStrategyOptions>;
 export const JsonStrategy: JsonStrategyType = {
-  createEncoder<F extends BareFunction>(
+  createEncoder<F extends AnyFunction>(
     options?: JsonStrategyOptions,
   ): MemoizerEncoder<string, F> {
     const considerThisArg = options?.considerThisArg ?? false;

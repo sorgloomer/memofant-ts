@@ -15,5 +15,6 @@ ij_typescript_align_multiline_parameters = false
 #ij_any_align_multiline_parameters_in_calls = false
 ij_typescript_use_double_quotes = true
 ij_typescript_force_quote_style = true
+
 [*.md]
 trim_trailing_whitespace = false

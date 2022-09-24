@@ -24,7 +24,7 @@ export function isString(x: unknown): x is string {
   return typeof x === 'string';
 }
 
-export function isMutableRef(x: unknown): x is {} {
+export function isReferenceType(x: unknown): x is {} {
     return !isPrimitive(x);
 }
 

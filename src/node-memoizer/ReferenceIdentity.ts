@@ -1,15 +1,14 @@
-import { isMutableRef } from "utils/types";
+import { isReferenceType } from "utils/types";
 import { newInfiniteCounter } from "./InfiniteCounter";
-import { SymbolicWeakMap } from "utils/SymbolicWeakMap";
 
 
 type ReferenceIdentity = number | string;
-const identities = new SymbolicWeakMap<ReferenceIdentity>('reference_identity');
+const identities = new WeakMap<object, ReferenceIdentity>();
 
 const { next: infiniteNext } = newInfiniteCounter();
 
 export function referenceIdentity(x: unknown): ReferenceIdentity | undefined {
-    if (!isMutableRef(x)) {
+    if (!isReferenceType(x)) {
         return undefined;
     }
     const oldId = identities.get(x);
